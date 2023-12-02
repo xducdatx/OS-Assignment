@@ -111,7 +111,17 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
   caller->mm->symrgtbl[rgid].rg_end = old_sbrk + size;
 
   *alloc_addr = old_sbrk;
-
+  // Add free region to freerg_list
+  if (old_sbrk + size < cur_vma -> vm_end)
+  {
+    struct vm_rg_struct rg_elmt;
+    rg_elmt.rg_start = old_sbrk + size;
+    rg_elmt.rg_end = cur_vma -> vm_end;
+    rg_elmt.rg_next = NULL;
+    enlist_vm_freerg_list(caller -> mm, rg_elmt);
+  }
+  // Update sbrk
+  cur_vma -> sbrk += size;
   return 0;
 }
 
@@ -130,7 +140,9 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
     return -1;
 
   /* TODO: Manage the collect freed region to freerg_list */
-
+  rgnode.rg_start = caller -> mm -> symrgtbl[rgid].rg_start;
+  rgnode.rg_end = caller -> mm -> symrgtbl[rgid].rg_end;
+  rgnode.rg_next = NULL;
   /*enlist the obsoleted memory region */
   enlist_vm_freerg_list(caller->mm, rgnode);
 
@@ -442,12 +454,30 @@ int inc_vma_limit(struct pcb_t *caller, int vmaid, int inc_sz)
  *@pgn: return page number
  *
  */
-int find_victim_page(struct mm_struct *mm, int *retpgn) 
+int find_victim_page(struct mm_struct *mm, int *retpgn) // Find the first entry to frame
 {
   struct pgn_t *pg = mm->fifo_pgn;
 
   /* TODO: Implement the theorical mechanism to find the victim page */
-
+  if (pg == NULL)
+  {
+    return -1;
+  }
+  if (pg -> pg_next == NULL)
+  {
+    mm -> fifo_pgn = NULL;
+  }
+  else
+  {
+    struct pgn_t *prev;
+    while (pg -> pg_next != NULL)
+    {
+        prev = pg;
+        pg = pg -> pg_next;
+    }
+    prev -> pg_next = NULL;
+  }
+  *retpgn = pg -> pgn;
   free(pg);
 
   return 0;
