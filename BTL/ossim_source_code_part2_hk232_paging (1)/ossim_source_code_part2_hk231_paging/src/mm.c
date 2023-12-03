@@ -143,7 +143,7 @@ int alloc_pages_range(struct pcb_t *caller, int req_pgnum, struct framephy_struc
       newfp_str -> owner = caller -> mm;
       if (*frm_lst == NULL)
       {
-        frm_lst = newfp_str;
+        *frm_lst = newfp_str;
       }
       else
       {

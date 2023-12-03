@@ -193,7 +193,7 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
     int tgtfpn = PAGING_SWP(pte);//the target frame storing our variable
 
     int freefp;
-    if (MEMPHY_get_freefp(caller -> mram, freefp) == 0) // Check if RAM is free
+    if (MEMPHY_get_freefp(caller -> mram, &freefp) == 0) // Check if RAM is free
     {
       // Copy target from SWAP TO RAM
       __swap_cp_page(caller -> active_mswp, tgtfpn, caller -> mram, freefp);
