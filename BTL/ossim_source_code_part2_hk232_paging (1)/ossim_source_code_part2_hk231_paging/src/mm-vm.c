@@ -8,24 +8,25 @@
 #include "mm.h"
 #include <stdlib.h>
 #include <stdio.h>
-
+#include <pthread.h>
 /*enlist_vm_freerg_list - add new rg to freerg_list
  *@mm: memory region
  *@rg_elmt: new region
  *
  */
-int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct rg_elmt)
+static pthread_mutex_t mem_lock;
+int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt)
 {
   struct vm_rg_struct *rg_node = mm->mmap->vm_freerg_list;
 
-  if (rg_elmt.rg_start >= rg_elmt.rg_end)
+  if (rg_elmt -> rg_start >= rg_elmt -> rg_end)
     return -1;
 
   if (rg_node != NULL)
-    rg_elmt.rg_next = rg_node;
+    rg_elmt -> rg_next = rg_node;
 
   /* Enlist the new region */
-  mm->mmap->vm_freerg_list = &rg_elmt;
+  mm->mmap->vm_freerg_list = rg_elmt;
 
   return 0;
 }
@@ -78,6 +79,7 @@ struct vm_rg_struct *get_symrg_byid(struct mm_struct *mm, int rgid)
  */
 int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr)
 {
+  pthread_mutex_lock(&mem_lock);
   /*Allocate at the toproof */
   struct vm_rg_struct rgnode;
 
@@ -87,7 +89,7 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
     caller->mm->symrgtbl[rgid].rg_end = rgnode.rg_end;
 
     *alloc_addr = rgnode.rg_start;
-
+    pthread_mutex_unlock(&mem_lock);
     return 0;
   }
 
@@ -114,14 +116,15 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
   // Add free region to freerg_list
   if (old_sbrk + size < cur_vma -> vm_end)
   {
-    struct vm_rg_struct rg_elmt;
-    rg_elmt.rg_start = old_sbrk + size;
-    rg_elmt.rg_end = cur_vma -> vm_end;
-    rg_elmt.rg_next = NULL;
-    enlist_vm_freerg_list(caller -> mm, rg_elmt);
+    struct vm_rg_struct *rgnode = malloc(sizeof(struct vm_rg_struct));
+    rgnode -> rg_start = old_sbrk + size;
+    rgnode -> rg_end = cur_vma -> vm_end;
+    rgnode -> rg_next = NULL;
+    enlist_vm_freerg_list(caller -> mm, rgnode);
   }
   // Update sbrk
-  cur_vma -> sbrk += size;
+  cur_vma -> sbrk += inc_sz;
+  pthread_mutex_unlock(&mem_lock);
   return 0;
 }
 
@@ -134,18 +137,22 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
  */
 int __free(struct pcb_t *caller, int vmaid, int rgid)
 {
-  struct vm_rg_struct rgnode;
+  pthread_mutex_lock(&mem_lock);
+  struct vm_rg_struct *rgnode = malloc(sizeof(struct vm_rg_struct));
 
   if(rgid < 0 || rgid > PAGING_MAX_SYMTBL_SZ)
+  {
+    pthread_mutex_unlock(&mem_lock);
     return -1;
+  }
 
   /* TODO: Manage the collect freed region to freerg_list */
-  rgnode.rg_start = caller -> mm -> symrgtbl[rgid].rg_start;
-  rgnode.rg_end = caller -> mm -> symrgtbl[rgid].rg_end;
-  rgnode.rg_next = NULL;
+  rgnode -> rg_start = caller -> mm -> symrgtbl[rgid].rg_start;
+  rgnode -> rg_end = caller -> mm -> symrgtbl[rgid].rg_end;
+  rgnode -> rg_next = NULL;
   /*enlist the obsoleted memory region */
   enlist_vm_freerg_list(caller->mm, rgnode);
-
+  pthread_mutex_unlock(&mem_lock);
   return 0;
 }
 
@@ -293,15 +300,19 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
  */
 int __read(struct pcb_t *caller, int vmaid, int rgid, int offset, BYTE *data)
 {
+  pthread_mutex_lock(&mem_lock);
   struct vm_rg_struct *currg = get_symrg_byid(caller->mm, rgid);
 
   struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
 
   if(currg == NULL || cur_vma == NULL) /* Invalid memory identify */
-	  return -1;
+  {
+    pthread_mutex_unlock(&mem_lock);
+    return -1;
+  }
 
   pg_getval(caller->mm, currg->rg_start + offset, data, caller);
-
+  pthread_mutex_unlock(&mem_lock);
   return 0;
 }
 
@@ -338,15 +349,19 @@ int pgread(
  */
 int __write(struct pcb_t *caller, int vmaid, int rgid, int offset, BYTE value)
 {
+  pthread_mutex_lock(&mem_lock);
   struct vm_rg_struct *currg = get_symrg_byid(caller->mm, rgid);
 
   struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
   
   if(currg == NULL || cur_vma == NULL) /* Invalid memory identify */
-	  return -1;
+  {
+    pthread_mutex_unlock(&mem_lock);
+    return -1;
+  }
 
   pg_setval(caller->mm, currg->rg_start + offset, value, caller);
-
+  pthread_mutex_unlock(&mem_lock);
   return 0;
 }
 
